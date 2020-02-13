@@ -97,17 +97,10 @@ void groupFree(groupMalloc_t *group,void *pt){
   size_t c,d;
   wait(&group->turn);
   while(slab){
-	if((intptr_t)pt>(intptr_t)slab&&(intptr_t)pt<(intptr_t)slab+group->numPages*PAGESIZE)
-		for(c=0;c<numMaps;++c)
-			if(slab->maps[c]!=~(MAPTYPE)0)
-				for(({mask=(MAPTYPE)1;d=0;});d<MAPBITS;({mask<<=1;++d;}))
-					if((intptr_t)&slab->maps[numMaps]+group->objSize*(c*MAPBITS+d)==(intptr_t)pt){
-						if(slab->maps[c]&mask)
-							printf("Free invalid pointer\n");
-						slab->maps[c]|=mask;
-						post(&group->turn);
-						return;
-					}
+	if((intptr_t)pt>(intptr_t)slab&&(intptr_t)pt<(intptr_t)slab+group->numPages*PAGESIZE){
+		intptr_t off=((intptr_t)pt-(intptr_t)slab-(intptr_t)sizeof(void*)-(intptr_t)(sizeof(MAPTYPE)*group->numMaps))/(intptr_t)group->objSize;
+		slab->maps[off/(intptr_t)MAPBITS]|=((MAPTYPE)1)<<(off%(intptr_t)MAPBITS);
+	}
 	slab=slab->next;
   }
   post(&group->turn);
