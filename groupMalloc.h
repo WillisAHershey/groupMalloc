@@ -4,6 +4,9 @@
 #include <unistd.h>
 #include <sys/mman.h>
 
+//Comment this next line out before assembling if you don't want thread safety
+#define THREAD_SAFE
+
 #ifdef THREAD_SAFE
 	#include <semaphore.h>
 	#define wait(c) sem_wait(c)

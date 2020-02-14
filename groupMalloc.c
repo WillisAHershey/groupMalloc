@@ -41,7 +41,7 @@ int groupMallocInit(groupMalloc_t *group,size_t size){
 }
 
 void* groupMalloc(groupMalloc_t* group){
-  groupMallocSlab_t *slab=group->current,*last;
+  groupMallocSlab_t *slab=group->current,*last=NULL;
   size_t numMaps=group->numObjs%MAPBITS?group->numObjs/MAPBITS+1:group->numObjs/MAPBITS;
   MAPTYPE mask;
   size_t c,d;
@@ -91,16 +91,28 @@ void* groupMalloc(groupMalloc_t* group){
 }
 
 void groupFree(groupMalloc_t *group,void *pt){
-  groupMallocSlab_t *slab=group->start;
+  groupMallocSlab_t *slab=group->start,*last=NULL;
   size_t numMaps=group->numObjs%MAPBITS?group->numObjs/MAPBITS+1:group->numObjs/MAPBITS;
-  MAPTYPE mask;
-  size_t c,d;
   wait(&group->turn);
   while(slab){
 	if((intptr_t)pt>(intptr_t)slab&&(intptr_t)pt<(intptr_t)slab+group->numPages*PAGESIZE){
-		intptr_t off=((intptr_t)pt-(intptr_t)slab-(intptr_t)sizeof(void*)-(intptr_t)(sizeof(MAPTYPE)*group->numMaps))/(intptr_t)group->objSize;
+		intptr_t off=((intptr_t)pt-(intptr_t)slab-(intptr_t)sizeof(groupMallocSlab_t)-(intptr_t)(sizeof(MAPTYPE)*numMaps))/(intptr_t)group->objSize;
 		slab->maps[off/(intptr_t)MAPBITS]|=((MAPTYPE)1)<<(off%(intptr_t)MAPBITS);
+		if(off/(intptr_t)MAPBITS==numMaps&&slab->maps[off/(intptr_t)MAPBITS]==(((MAPTYPE)1)<<(off%(intptr_t)MAPBITS))-1){
+			if(last){
+				last->next=slab->next;
+				MUNMAP_PAGESIZE(slab,group->numPages);
+			}
+			else if(slab->next){
+				group->start=slab->next;
+				if(group->current==slab)
+					group->current=slab->next;
+				MUNMAP_PAGESIZE(slab,group->numPages);
+			}
+		}
+		return;
 	}
+	last=slab;
 	slab=slab->next;
   }
   post(&group->turn);
