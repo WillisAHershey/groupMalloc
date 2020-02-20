@@ -1,8 +1,17 @@
+//Willis Hershey wrote this whole damned thing and it is broken and beautiful someone please give him a job
+//Last updated February 20th, 2020
+
 #include "groupMalloc.h"
 
+//Initializes a groupMalloc structure to efficiently malloc a given number of bytes, and allocates an appropriate amount of pages for the first slab
+//Returns 0 on bad inputs or failure, and returns 1 on success
 int groupMallocInit(groupMalloc_t *group,size_t size){
   if(!group||!size)
 	return 0;
+#ifdef THREAD_SAFE
+  if(sem_init(&group->turn,0,1)==-1)
+	return 0;
+#endif
   size_t numPages,numObjs,numMaps;
   if(size*MAPBITS+sizeof(groupMallocSlab_t)+sizeof(MAPTYPE)<=PAGESIZE){
 	for(numMaps=1;size*numMaps*MAPBITS+sizeof(MAPTYPE)*numMaps+sizeof(groupMallocSlab_t)<PAGESIZE;++numMaps)
@@ -34,13 +43,14 @@ int groupMallocInit(groupMalloc_t *group,size_t size){
 	slab->maps[c]=~(MAPTYPE)0;
   if(numObjs%MAPBITS)
 	slab->maps[c]=(((MAPTYPE)1)<<numObjs%MAPBITS)-1;
-#ifdef THREAD_SAFE
-  sem_init(&group->turn,0,1);
-#endif
   return 1;
 }
 
+//Returns a pointer to a chunk of memory that is the size that the groupMalloc structure was initialized with
+//Returns NULL on failure
 void* groupMalloc(groupMalloc_t* group){
+  if(!group)
+	return NULL;
   groupMallocSlab_t *slab=group->current,*last=NULL;
   size_t numMaps=group->numObjs%MAPBITS?group->numObjs/MAPBITS+1:group->numObjs/MAPBITS;
   MAPTYPE mask;
@@ -91,6 +101,8 @@ void* groupMalloc(groupMalloc_t* group){
 }
 
 void groupFree(groupMalloc_t *group,void *pt){
+  if(!group||!pt)
+	return;
   groupMallocSlab_t *slab=group->start,*last=NULL;
   size_t numMaps=group->numObjs%MAPBITS?group->numObjs/MAPBITS+1:group->numObjs/MAPBITS;
   wait(&group->turn);
@@ -119,7 +131,10 @@ void groupFree(groupMalloc_t *group,void *pt){
   return;
 }
 
+//Unmaps all of the pages associated with a given groupMalloc structure
 void groupMallocDestroy(groupMalloc_t *group){
+  if(!group)
+	return;
   groupMallocSlab_t *slab=group->start;
   groupMallocSlab_t *next;
   while(slab){
@@ -127,5 +142,4 @@ void groupMallocDestroy(groupMalloc_t *group){
 	MUNMAP_PAGESIZE(slab,group->numPages);
 	slab=next;
   }
-  return;
 }

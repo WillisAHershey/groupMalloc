@@ -1,3 +1,6 @@
+//Willis Hershey wrote this whole damned thing and it is broken and beautiful someone please give him a job
+//Last updated February 20th, 2020
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdint.h>
@@ -8,12 +11,12 @@
 #define THREAD_SAFE
 
 #ifdef THREAD_SAFE
-	#include <semaphore.h>
-	#define wait(c) sem_wait(c)
-	#define post(c) sem_post(c)
+#	include <semaphore.h>
+#	define wait(c) sem_wait(c)
+#	define post(c) sem_post(c)
 #else
-	#define wait(c) {}
-	#define post(c) {}
+#	define wait(c) {}
+#	define post(c) {}
 #endif
 
 #ifndef _GROUP_MALLOC
@@ -21,7 +24,7 @@
 
 #ifndef MAP_UNINITIALIZED
 //This prevents errors in systems that don't use the MAP_UNINITIALIZED flag, which seems to be most of them
-	#define MAP_UNINITIALIZED 0
+#	define MAP_UNINITIALIZED 0
 #endif
 
 #define MAPTYPE unsigned long
@@ -46,9 +49,8 @@ typedef struct groupMalloc{
 #endif
 }groupMalloc_t;
 
-int groupMallocInit(groupMalloc_t*,size_t); //Returns a pointer to a new groupMalloc structure configured for objects of a given size.
+int groupMallocInit(groupMalloc_t*,size_t); //Returns a pointer to a new groupMalloc structure configured for objects of a given size
 void* groupMalloc(groupMalloc_t*); //Returns a pointer to an available space in memory that can fit the object
 void groupFree(groupMalloc_t*,void*); //Frees the space to the groupMalloc_t structure so that it can be repurposed on a future groupMalloc() call
-void groupMallocDestroy(groupMalloc_t*); //Frees all memory associated with the groupMalloc_t structure. Access to any data stored there will be lost.
-
+void groupMallocDestroy(groupMalloc_t*); //Frees all memory associated with the groupMalloc_t structure. Access to any data stored there will be lost
 #endif
