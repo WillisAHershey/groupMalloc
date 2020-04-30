@@ -1,145 +1,29 @@
-//Willis Hershey wrote this whole damned thing and it is broken and beautiful someone please give him a job
-//Last updated February 20th, 2020
-
+//Willis A. Hershey
 #include "groupMalloc.h"
 
 //Initializes a groupMalloc structure to efficiently malloc a given number of bytes, and allocates an appropriate amount of pages for the first slab
 //Returns 0 on bad inputs or failure, and returns 1 on success
-int groupMallocInit(groupMalloc_t *group,size_t size){
-  if(!group||!size)
-	return 0;
-#ifdef THREAD_SAFE
-  if(sem_init(&group->turn,0,1)==-1)
-	return 0;
-#endif
-  size_t numPages,numObjs,numMaps;
-  if(size*MAPBITS+sizeof(groupMallocSlab_t)+sizeof(MAPTYPE)<=PAGESIZE){
-	for(numMaps=1;size*numMaps*MAPBITS+sizeof(MAPTYPE)*numMaps+sizeof(groupMallocSlab_t)<PAGESIZE;++numMaps)
-		;
-	if(PAGESIZE-sizeof(groupMallocSlab_t)-(numMaps+1)*sizeof(MAPTYPE)-size*MAPBITS*numMaps>size)
-		++numMaps;
-	numPages=1;
-	numObjs=(PAGESIZE-sizeof(groupMallocSlab_t)-numMaps*sizeof(MAPTYPE))/size;
+
+void actualgroupMallocInit(groupMalloc_t *dest,size_t size,size_t alignment){
+  printf("size:%zd alignment:%zd\n",size,alignment);
+  size_t objSpace=(PAGESIZE-sizeof(MAPTYPE)-sizeof(void*));
+  if(objSpace&(alignment-1)){
+	printf("ObjSpace fix\n");
+	objSpace+=alignment;
+	objSpace&=~(alignment-1);
   }
-  else{
-	numPages=(size*MAPBITS)/PAGESIZE;
-	numPages=numPages;
-	if(PAGESIZE*numPages-2*sizeof(MAPTYPE)-sizeof(groupMallocSlab_t)-size*MAPBITS>size)
-		numMaps=2;
-	else
-		numMaps=1;
-	numObjs=(numPages*PAGESIZE-numMaps*sizeof(MAPTYPE)-sizeof(groupMallocSlab_t))/size;
-  }
-  groupMallocSlab_t *slab=MMAP_PAGESIZE(numPages);
-  if(slab==MAP_FAILED)
-	return 0;
-  group->start=group->current=slab;
-  group->objSize=size;
-  group->numPages=numPages;
-  group->numObjs=numObjs;
-  slab->next=NULL;
-  size_t c;
-  for(c=0;c<numObjs/MAPBITS;++c)
-	slab->maps[c]=~(MAPTYPE)0;
-  if(numObjs%MAPBITS)
-	slab->maps[c]=(((MAPTYPE)1)<<numObjs%MAPBITS)-1;
-  return 1;
+  printf("Objspace:%zd\n",objSpace);
+
 }
 
-//Returns a pointer to a chunk of memory that is the size that the groupMalloc structure was initialized with
-//Returns NULL on failure
-void* groupMalloc(groupMalloc_t* group){
-  if(!group)
-	return NULL;
-  groupMallocSlab_t *slab=group->current,*last=NULL;
-  size_t numMaps=group->numObjs%MAPBITS?group->numObjs/MAPBITS+1:group->numObjs/MAPBITS;
-  MAPTYPE mask;
-  size_t c,d;
-  wait(&group->turn);
-  for(c=0;c<numMaps;++c)
-	if(slab->maps[c])
-		for(({mask=(MAPTYPE)1;d=0;});d<MAPBITS;({mask<<=1;++d;}))
-			if(mask&slab->maps[c]){
-				slab->maps[c]&=~mask;
-				post(&group->turn);
-				return (void*)(((intptr_t)&slab->maps[numMaps])+group->objSize*(MAPBITS*c+d));
-			}
-  if(slab==group->start){
-	last=slab;
-	slab=NULL;
-  }
-  else
-	slab=group->start;
-  while(slab){
-	for(c=0;c<numMaps;++c)
-		if(slab->maps[c])
-			for(({mask=(MAPTYPE)1;d=0;});d<MAPBITS;({mask<<=1;++d;}))
-				if(mask&slab->maps[c]){
-					slab->maps[c]&=~mask;
-					post(&group->turn);
-					return (void*)(((intptr_t)&slab->maps[numMaps])+group->objSize*(MAPBITS*c+d));
-				}
-	last=slab;
-	slab=slab->next;
-  }
-  last->next=MMAP_PAGESIZE(group->numPages);
-  if(!last->next){
-	post(&group->turn);
-	return NULL;
-  }
-  slab=last->next;
-  slab->next=NULL;
-  d=group->numObjs/MAPBITS;
-  for(c=0;c<d;++c)
-	slab->maps[c]=~(MAPTYPE)0;
-  if(group->numObjs%MAPBITS)
-	slab->maps[c]=(((MAPTYPE)1)<<(group->numObjs%MAPBITS))-1;
-  --slab->maps[0];
-  group->current=slab;
-  post(&group->turn);
-  return (void*)&slab->maps[numMaps];
+void* groupMalloc(groupMalloc_t *group){
+  return NULL;
 }
 
 void groupFree(groupMalloc_t *group,void *pt){
-  if(!group||!pt)
-	return;
-  groupMallocSlab_t *slab=group->start,*last=NULL;
-  size_t numMaps=group->numObjs%MAPBITS?group->numObjs/MAPBITS+1:group->numObjs/MAPBITS;
-  wait(&group->turn);
-  while(slab){
-	if((intptr_t)pt>(intptr_t)slab&&(intptr_t)pt<(intptr_t)slab+group->numPages*PAGESIZE){
-		intptr_t off=((intptr_t)pt-(intptr_t)slab-(intptr_t)sizeof(groupMallocSlab_t)-(intptr_t)(sizeof(MAPTYPE)*numMaps))/(intptr_t)group->objSize;
-		slab->maps[off/(intptr_t)MAPBITS]|=((MAPTYPE)1)<<(off%(intptr_t)MAPBITS);
-		if(off/(intptr_t)MAPBITS==numMaps&&slab->maps[off/(intptr_t)MAPBITS]==(((MAPTYPE)1)<<(off%(intptr_t)MAPBITS))-1){
-			if(last){
-				last->next=slab->next;
-				MUNMAP_PAGESIZE(slab,group->numPages);
-			}
-			else if(slab->next){
-				group->start=slab->next;
-				if(group->current==slab)
-					group->current=slab->next;
-				MUNMAP_PAGESIZE(slab,group->numPages);
-			}
-		}
-		return;
-	}
-	last=slab;
-	slab=slab->next;
-  }
-  post(&group->turn);
   return;
 }
 
-//Unmaps all of the pages associated with a given groupMalloc structure
 void groupMallocDestroy(groupMalloc_t *group){
-  if(!group)
-	return;
-  groupMallocSlab_t *slab=group->start;
-  groupMallocSlab_t *next;
-  while(slab){
-	next=slab->next;
-	MUNMAP_PAGESIZE(slab,group->numPages);
-	slab=next;
-  }
+  return;
 }
